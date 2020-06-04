@@ -51,6 +51,7 @@ class PrioritizedReplayMemory:
         self.discount = args.gamma
         self.priority_weight = args.priority_weight
         self.priority_exponent = args.priority_exponent
+        self.absolute_error_upper = args.absolute_error_upper
         self.t = 0 # Internal episode timestep counter
         self.tree = SegmentTree(capacity) # Store experiences in a wrap-around cyclic buffer within a sum tree for querying priorities
         self.priority_weight_increase = (1 - args.priority_weight) / self.capacity
@@ -94,8 +95,10 @@ class PrioritizedReplayMemory:
         return tree_idxs, states, actions, rewards, next_states, dones, weights
 
     def update_priorities(self, idxs, priorities):
-        priorities = np.power(priorities, self.priority_exponent)
-        for idx, priority in zip(idxs, priorities):
+        # priorities = errors
+        clipped_errors = np.minimum(priorities, self.absolute_error_upper)
+        clipped_errors = np.power(clipped_errors, self.priority_exponent)
+        for idx, priority in zip(idxs, clipped_errors):
             self.tree.update(idx, priority)
 
     def __len__(self):

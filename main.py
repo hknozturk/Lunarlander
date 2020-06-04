@@ -24,6 +24,7 @@ parser.add_argument("--eps_decay", type=float, default=0.995, help="Decay epsilo
 parser.add_argument("--update_every", type=int, default=2, help="How often to update the network")
 parser.add_argument("--priority_exponent", type=float, default=0.6, metavar="ω", help="Prioritised experience replay exponent (originally denoted α)")
 parser.add_argument("--priority_weight", type=float, default=0.4, metavar="β", help="Initial prioritised experience replay importance sampling weight")
+parser.add_argument("--absolute_error_upper", type=float, default=1., help="Clipped abs error")
 args = parser.parse_args()
 
 env = gym.make(args.env)

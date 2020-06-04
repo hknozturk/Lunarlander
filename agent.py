@@ -2,7 +2,7 @@ import numpy as np
 import random
 from collections import namedtuple, deque
 
-from memory import ReplayMemory
+from memory import ReplayMemory, PrioritizedReplayMemory
 from model import QNet, DuelingQNet
 
 import torch
@@ -12,20 +12,20 @@ import torch.optim as optim
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class Agent():
-    def __init__(self, state_size, action_size, seed, dueling, buffer_size, batch_size, gamma, tau, lr, update_freq):
+    def __init__(self, args, state_size, action_size, seed):
         self.state_size = state_size
         self.action_size = action_size
         self.seed = random.seed(seed)
-        self.dueling = dueling
-        self.buffer_size = buffer_size
-        self.batch_size = batch_size
-        self.gamma = gamma
-        self.tau = tau
-        self.lr = lr
-        self.update_freq = update_freq
-
+        self.per = args.per
+        self.dueling = args.dueling
+        self.buffer_size = args.buffer_size
+        self.batch_size = args.batch_size
+        self.gamma = args.gamma
+        self.tau = args.tau
+        self.lr = args.learning_rate
+        self.update_freq = args.update_every
         # Q-Network
-        if dueling:
+        if self.dueling:
             self.local_qnet = DuelingQNet(state_size, action_size, seed).to(device)
             self.target_qnet = DuelingQNet(state_size, action_size, seed).to(device)
         else:
@@ -35,21 +35,26 @@ class Agent():
         self.optimizer = optim.Adam(self.local_qnet.parameters(), lr=self.lr)
 
         # Replay Memory
-        self.memory = ReplayMemory(action_size, self.buffer_size, self.batch_size, seed)
+        if self.per:
+            self.memory = PrioritizedReplayMemory(args, self.buffer_size)
+        else:
+            self.memory = ReplayMemory(action_size, self.buffer_size, self.batch_size, seed)
         self.t_step = 0 # init time step for updating every UPDATE_EVERY steps
 
     def step(self, state, action, reward, next_state, done):
-        self.memory.add(state, action, reward, next_state, done) # save experience to replay memory.
+        if self.per:
+            self.memory.append(state, action, reward, next_state, done)
+        else:
+            self.memory.add(state, action, reward, next_state, done) # save experience to replay memory.
         # Learn every UPDATE_EVERY time steps.
         self.t_step = (self.t_step + 1) % self.update_freq
         if self.t_step == 0:
             # If enough samples are available in memory, get random subset and learn
             if len(self.memory) > self.batch_size:
-                experiences = self.memory.sample()
                 if self.dueling:
-                    self.learn_DDQN(experiences, self.gamma)
+                    self.learn_DDQN(self.gamma)
                 else:
-                    self.learn(experiences, self.gamma)
+                    self.learn(self.gamma)
     
     def act(self, state, eps=0.):
         state = torch.from_numpy(state).float().unsqueeze(0).to(device)
@@ -64,8 +69,11 @@ class Agent():
         else:
             return random.choice(np.arange(self.action_size))
     
-    def learn(self, experiences, gamma):
-        states, actions, rewards, next_states, dones = experiences
+    def learn(self, gamma):
+        if self.per:
+            idxs, states, actions, rewards, next_states, dones, weights = self.memory.sample(self.batch_size)
+        else:
+            states, actions, rewards, next_states, dones = self.memory.sample()
         # Get max predicted Q values for next states from target model
         Q_targets_next = self.target_qnet(next_states).detach().max(1)[0].unsqueeze(1)
         # Compute Q targets for current states
@@ -78,13 +86,23 @@ class Agent():
         loss = F.mse_loss(Q_expected, Q_targets)
         # Minimize loss
         self.optimizer.zero_grad()
-        loss.backward()
+        if self.per:
+            (weights * loss).mean().backward() # Backpropagate importance-weighted minibatch loss
+        else:
+            loss.backward()
         self.optimizer.step()
+
+        if self.per:
+            errors = np.abs((Q_expected - Q_targets).detach().cpu().numpy())
+            self.memory.update_priorities(idxs, errors)
         # Update target network
         self.soft_update(self.local_qnet, self.target_qnet, self.tau)
 
-    def learn_DDQN(self, experiences, gamma):
-        states, actions, rewards, next_states, dones = experiences
+    def learn_DDQN(self, gamma):
+        if self.per:
+            idxs, states, actions, rewards, next_states, dones, weights = self.memory.sample(self.batch_size)
+        else:
+            states, actions, rewards, next_states, dones = self.memory.sample()
         # Get index of maximum value for next state from Q_expected
         Q_argmax = self.local_qnet(next_states).detach()
         _, a_prime = Q_argmax.max(1)
@@ -101,8 +119,15 @@ class Agent():
         loss = F.mse_loss(Q_expected, Q_targets)
         # Minimize loss
         self.optimizer.zero_grad()
-        loss.backward()
+        if self.per:
+            (weights * loss).mean().backward() # Backpropagate importance-weighted minibatch loss
+        else:
+            loss.backward()
         self.optimizer.step()
+        
+        if self.per:
+            errors = np.abs((Q_expected - Q_targets).detach().cpu().numpy())
+            self.memory.update_priorities(idxs, errors)
         # Update target network
         self.soft_update(self.local_qnet, self.target_qnet, self.tau)
 

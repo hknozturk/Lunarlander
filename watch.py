@@ -4,37 +4,32 @@ import torch
 from agent import Agent
 
 class WatchTrainedAgent:
-    def __init__(self, env_name, dueling, eps, t, buffer_size, batch_size, gamma, lr, update_fr, tau):
-        self.env_name = env_name
-        self.dueling = dueling
-        self.eps = eps
-        self.t = t
-        self.buffer_size = buffer_size
-        self.batch_size = batch_size
-        self.gamma = gamma
-        self.lr = lr
-        self.update_fr = update_fr
+    def __init__(self, args):
+        self.env_name = args.env
+        self.per = args.per
+        self.dueling = args.dueling
+        self.eps = args.episodes
+        self.t = args.max_timestep
+        self.buffer_size = args.buffer_size
+        self.batch_size = args.batch_size
+        self.gamma = args.gamma
+        self.lr = args.learning_rate
+        self.update_fr = args.update_every
 
-        self.env = gym.make(env_name)
+        self.env = gym.make(args.env)
         self.env.seed(0)
         self.n_states = self.env.observation_space.shape[0]
         self.n_actions = self.env.action_space.n
         self.agent = Agent(
+            args,
             state_size = self.n_states,
             action_size = self.n_actions,
-            seed = 0,
-            dueling = dueling,
-            buffer_size = buffer_size,
-            batch_size = batch_size,
-            gamma = gamma,
-            tau = tau,
-            lr = lr,
-            update_freq = update_fr
+            seed = 0
         )
     
     def watch(self):
         self.agent.local_qnet.load_state_dict(
-            torch.load('saves/save-{}-{}_dueling-{}_eps-{}_t-{}_buffer-{}_batch-{}_gamma-{}_lr-{}_update_fr'.format(self.env_name, self.dueling, self.eps, self.t, self.buffer_size, self.batch_size, self.gamma, self.lr, self.update_fr), map_location = lambda storage, loc: storage))
+            torch.load('results/model-{}-{}_per-{}_dueling-{}_eps-{}_t-{}_buffer-{}_batch-{}_gamma-{}_lr-{}_update_fr'.format(self.env_name, self.per, self.dueling, self.eps, self.t, self.buffer_size, self.batch_size, self.gamma, self.lr, self.update_fr), map_location = lambda storage, loc: storage))
             
         for i in range(3):
             state = self.env.reset()
